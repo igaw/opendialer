@@ -1,0 +1,286 @@
+#!/usr/bin/python
+#
+#  OpenDialer - Open Source Dialer GUI
+#
+#  Copyright (C) 2011  BMW Car IT GmbH. All rights reserved.
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License version 2 as
+#  published by the Free Software Foundation.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+#
+import sys
+import dbus
+import dbus.mainloop.glib
+import gobject
+import logging
+
+#------------------------------------------------------------------------------
+# Helper functions
+#------------------------------------------------------------------------------
+def show_syntax_and_exit():
+    print "Syntax:"
+    print "  %s -h, --help" % sys.argv[0]
+    print "  %s [-d, --debug] [<bt-address>]" % sys.argv[0]
+    sys.exit(0)
+
+def get_default_adapter():
+    bus = dbus.SystemBus()
+    adapter = None
+    try:
+        manager = dbus.Interface(
+            bus.get_object("org.bluez", "/"), "org.bluez.Manager")
+        adapter_path = manager.DefaultAdapter()
+        return dbus.Interface(
+            bus.get_object("org.bluez", adapter_path),
+            "org.bluez.Adapter")
+    except dbus.exceptions.DBusException:
+        return None # BlueZ not found
+
+#------------------------------------------------------------------------------
+# InterfaceConnector
+#------------------------------------------------------------------------------
+class InterfaceConnector:
+    connect_initial_delay = 2.0
+    connect_retry_delay = 10.0
+    connect_timeout = 20.0
+
+    def __init__(self, device_path, interface_name):
+        self.device_path = device_path
+        self.interface_name = interface_name
+        self.enabled = False
+
+    def enable(self):
+        # Returns false to be used with timeout_add
+        if self.enabled:
+            return False
+        self.enabled = True
+        logging.debug("Enabling connector %s" % self.interface_name)
+        gobject.timeout_add(
+            int(self.connect_initial_delay * 1000), self.do_connect)
+        return False
+
+    def disable(self):
+        # Returns false to be used with timeout_add
+        if self.enabled:
+            logging.debug("Disabling connector %s" % self.interface_name)
+        self.enabled = False
+        return False
+
+    def do_connect(self):
+        if not(self.enabled):
+            return False # Finished
+        try:
+            bus = dbus.SystemBus()
+            interface = dbus.Interface(
+                bus.get_object("org.bluez", self.device_path),
+                self.interface_name)
+            interface.Connect(
+                reply_handler=self.disable,
+                error_handler=self.on_error,
+                timeout=self.connect_timeout)
+        except dbus.exceptions.DBusException:
+            self.on_error(None)
+        return False # Finished, and wait for success or error
+
+    def on_error(self, error):
+        logging.debug(
+            "Connect failed. Retrying after %d secs" % self.connect_retry_delay)
+        gobject.timeout_add(
+            int(self.connect_retry_delay * 1000),
+            self.do_connect)
+
+#------------------------------------------------------------------------------
+# DeviceConnector
+#------------------------------------------------------------------------------
+class DeviceConnector:
+    enabled_interfaces = [ "HandsfreeGateway", "AudioSource" ]
+
+    def __init__(self, device_address):
+        assert(device_address != None)
+        bus = dbus.SystemBus()
+        self.device_address = device_address
+        self.interface_connector_dict = dict()
+        self.install_signal_receivers()
+        self.poll_device_path()
+
+    def install_signal_receivers(self):
+        bus = dbus.SystemBus()
+        bus.add_signal_receiver(
+            self.name_owner_changed,
+            dbus_interface="org.freedesktop.DBus",
+            signal_name="NameOwnerChanged")
+        observed_interfaces = [ "Device" ] + self.enabled_interfaces
+        for observed_interface in observed_interfaces:
+            bus.add_signal_receiver(
+                self.process_property,
+                dbus_interface="org.bluez." + observed_interface,
+                signal_name="PropertyChanged",
+                path_keyword="path",
+                interface_keyword="interface")
+
+    def poll_device_path(self):
+        adapter = get_default_adapter()
+        if adapter == None:
+            self.device_path = None
+        else:
+            adapter.FindDevice(
+                self.device_address,
+                reply_handler=self.poll_device_path_response,
+                error_handler=lambda e: None)
+
+    def poll_device_path_response(self, path):
+        self.device_path = path
+        if path != None:
+            self.init_interface_connectors()
+            self.poll_device_properties(True)
+
+    def init_interface_connectors(self):
+        # This method assumes that self.device_path is valid (updated)
+        assert(self.device_path != None)
+        for enabled_interface in self.enabled_interfaces:
+            full_interface_name = "org.bluez." + enabled_interface
+            self.interface_connector_dict[full_interface_name] = (
+                InterfaceConnector(self.device_path, full_interface_name))
+
+    def shutdown_interface_connectors(self):
+        for interface_connector in self.interface_connector_dict.values():
+            interface_connector.disable()
+        self.interface_connector = dict()
+
+    def name_owner_changed(self, name, old_owner, new_owner):
+        if name == "org.bluez":
+            self.device_path = None # Needs to be updated
+            self.shutdown_interface_connectors()
+
+    def poll_device_properties(self, also_poll_device_interface):
+        assert(self.device_path != None)
+        observed_interfaces = list(self.interface_connector_dict.keys())
+        if also_poll_device_interface:
+            observed_interfaces += [ "org.bluez.Device" ]
+        for observed_interface in observed_interfaces:
+            self.poll_interface_properties(observed_interface)
+
+    def poll_interface_properties(self, interface_name):
+        interface = dbus.Interface(
+            bus.get_object("org.bluez", self.device_path), interface_name)
+        try:
+            interface.GetProperties(
+                reply_handler=lambda props:
+                    self.poll_interface_properties_response(
+                    interface_name, props),
+                error_handler=lambda e: None)
+        except dbus.exceptions.DBusException:
+            # Interface might not be available
+            return
+
+    def poll_interface_properties_response(self, interface, properties):
+        for (key, value) in properties.items():
+            self.process_property(
+                key, value, self.device_path, interface)
+
+    def probe_device(self, path):
+        # We need to check whether this device is our device
+        assert(self.device_path == None)
+        interface = dbus.Interface(
+            bus.get_object("org.bluez", path), "org.bluez.Device")
+        interface.GetProperties(
+            reply_handler=lambda props: self.probe_device_response(path, props),
+            error_handler=lambda e: None)
+
+    def probe_device_response(self, path, properties):
+        if properties.has_key("Address"):
+            if properties["Address"] == self.device_address:
+                # Device found
+                self.device_path = path
+                self.init_interface_connectors()
+                self.poll_device_properties(False)
+
+    def process_property(
+        self, property_name, property_value, path, interface):
+        # Detect device creation (or registration) of our device
+        if (interface == "org.bluez.Device" and property_name == "Paired" and
+            self.device_path == None):
+            self.probe_device(path)
+        # Otherwise, make sure the path corresponds to our device
+        if path != self.device_path:
+            return
+        # Handle the registration (or removal) of interfaces
+        if interface == "org.bluez.Device" and property_name == "UUIDs":
+            self.poll_device_properties(False)
+            return
+        # If some interface changed it connected state, update the appropriate
+        # InterfaceConnector accordingly
+        if property_name == "State":
+            if self.interface_connector_dict.has_key(interface):
+                interface_connector = self.interface_connector_dict[interface]
+                if property_value != "disconnected":
+                    interface_connector.disable()
+                else:
+                    interface_connector.enable()
+
+#------------------------------------------------------------------------------
+# Main
+#------------------------------------------------------------------------------
+if __name__ == "__main__":
+	dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
+        # Parse arguments
+        device_address = None
+        logging_level = logging.INFO
+        flags = set(filter(lambda x: x.startswith("-"), sys.argv[1:]))
+        nonflags = set(filter(lambda x: not(x.startswith("-")), sys.argv[1:]))
+        if "-h" in flags or "--help" in flags:
+            show_syntax_and_exit()
+        if "-d" in flags or "--debug" in flags:
+            flags.discard("-d")
+            flags.discard("-debug")
+            logging_level = logging.DEBUG
+        if len(nonflags) > 1 or len(flags) > 0:
+            show_syntax_and_exit()
+        if len(nonflags) == 1:
+            device_address = list(nonflags)[0]
+
+        # Initialize logging system
+        logging.basicConfig(
+            format = "[%(asctime)s] %(message)s",
+            level = logging_level)
+
+        # Choose an arbitrary device if none given
+        if device_address == None:
+            bus = dbus.SystemBus()
+            adapter = get_default_adapter()
+            if adapter == None:
+                logging.error("ERROR: BlueZ not found so cannot choose device")
+                sys.exit(1)
+            logging.info("Device address not given, so picking first device...")
+            # Get first device
+            devices = adapter.GetProperties()["Devices"]
+            if len(devices) == 0:
+                logging.error("ERROR: No devices available")
+                sys.exit(1)
+            device_path = devices[0]
+            # Get device address
+            device = dbus.Interface(
+                bus.get_object("org.bluez", device_path), "org.bluez.Device")
+            device_address = device.GetProperties()["Address"]
+            logging.info("Using device %s" % device_path)
+
+        # Create device connector
+        device_connector = DeviceConnector(device_address)
+
+        # Run main loop
+        try:
+            mainloop = gobject.MainLoop()
+            mainloop.run()
+        except KeyboardInterrupt:
+            print
+            print "Exiting"
