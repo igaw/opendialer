@@ -1,0 +1,28 @@
+OpenDialer - Open Source Dialer GUI
+***********************************
+
+Copyright (C) 2011  BMW Car IT GmbH. All rights reserved.
+
+
+Introduction
+============
+
+This program provides a simple GUI to cover basic telephony use-cases. For
+this purpose it makes use of the D-Bus API from oFono.
+
+Additional scripts are also provided to achieve the following features:
+
+1. Audio routing through PulseAudio Sound Server
+2. Auto-connection of handsfree devices in BlueZ (HandsfreeGateway)
+
+
+Dependencies
+============
+
+You will need Python, Qt4 and PyQt4 installed.
+
+In order to use the dialer, oFono needs to be running. You can also use it
+with any other component as long as it mimics the same API specification.
+
+If you also want the audio to be routed appropriately, you might also be
+interested in the provided utility scripts included with this component.
