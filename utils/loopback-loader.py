@@ -205,6 +205,8 @@ class LoopbackLoader:
         args = dict()
         args["source"] = source_name
         args["sink"] = sink_name
+        args["source_dont_move"] = "1"
+        args["sink_dont_move"] = "1"
         self.pa_core.LoadModule(
             "module-loopback", args,
             reply_handler=lambda p: None,
