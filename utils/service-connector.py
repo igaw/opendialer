@@ -170,6 +170,7 @@ class DeviceConnector:
             self.poll_interface_properties(observed_interface)
 
     def poll_interface_properties(self, interface_name):
+        bus = dbus.SystemBus()
         interface = dbus.Interface(
             bus.get_object("org.bluez", self.device_path), interface_name)
         try:
@@ -190,6 +191,7 @@ class DeviceConnector:
     def probe_device(self, path):
         # We need to check whether this device is our device
         assert(self.device_path == None)
+        bus = dbus.SystemBus()
         interface = dbus.Interface(
             bus.get_object("org.bluez", path), "org.bluez.Device")
         interface.GetProperties(
