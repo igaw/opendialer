@@ -136,6 +136,39 @@ class LoopbackLoader:
                     error_handler=lambda e: None)
             except dbus.exceptions.DBusException:
                 pass # Omit error silently
+        # Check if echo cancellation should be used
+        self.check_echo_cancellation()
+
+    def check_echo_cancellation(self):
+        properties_interface = dbus.Interface(
+            self.pa_core.proxy_object,
+            "org.freedesktop.DBus.Properties")
+        def set_ec_sink(device_path, device_name):
+            self.fallback_sink = device_name
+            logging.warning("Using echo cancellation sink: %s" % device_name)
+        def set_ec_source(device_path, device_name):
+            self.fallback_source = device_name
+            logging.warning("Using echo cancellation source: %s" % device_name)
+        def process_device(device_path, reply_handler):
+            if device_path == None:
+                return
+            def device_name_response(device_name):
+                if device_name.endswith(".echo-cancel"):
+                    reply_handler(device_path, device_name)
+            self.get_device_property(device_path, "Name", device_name_response)
+        def get_devices_response(devices, reply_handler):
+            for device_path in devices:
+                process_device(device_path, reply_handler)
+        properties_interface.Get(
+            "org.PulseAudio.Core1",
+            "Sinks",
+            reply_handler=lambda l: get_devices_response(l, set_ec_sink),
+            error_handler=lambda e: None)
+        properties_interface.Get(
+            "org.PulseAudio.Core1",
+            "Sources",
+            reply_handler=lambda l: get_devices_response(l, set_ec_source),
+            error_handler=lambda e: None)
 
     def get_device_property(self, device_path, property_name, reply_handler):
         try:
