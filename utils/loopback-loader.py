@@ -184,14 +184,14 @@ class LoopbackLoader:
         # Start requesting the name
         self.get_device_property(path, "Name", name_response)
 
-    def new_sink(self, sink_path):      
+    def new_sink(self, sink_path):
         def properties_response(name, protocol, device_string):
             logging.debug("New sink: %s; protocol: %s" % (name, protocol))
             if self.fallback_source != None:
                 self.load_loopback_module(self.fallback_source, name)
         self.get_common_sinksource_properties(sink_path, properties_response)
 
-    def new_source(self, source_path):      
+    def new_source(self, source_path):
         def properties_response(name, protocol, device_string):
             logging.debug("New source: %s; protocol: %s" % (name, protocol))
             if self.fallback_sink != None:
@@ -216,7 +216,7 @@ class LoopbackLoader:
 # Main
 #------------------------------------------------------------------------------
 if __name__ == "__main__":
-	dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
         # Parse arguments
         device_address = None

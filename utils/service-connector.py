@@ -233,7 +233,7 @@ class DeviceConnector:
 # Main
 #------------------------------------------------------------------------------
 if __name__ == "__main__":
-	dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
         # Parse arguments
         device_address = None
