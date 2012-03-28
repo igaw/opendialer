@@ -1,0 +1,6 @@
+[Desktop Entry]
+Version=0.1
+Name=OpenDialer
+Comment=Open Source Dialer GUI
+Exec=opendialer
+TargetEnvironment=Unity

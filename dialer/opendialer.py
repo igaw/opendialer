@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  OpenDialer - Open Source Dialer GUI
 #
@@ -25,6 +25,15 @@ import subprocess
 import resources
 import logging
 from PyQt4 import QtGui, QtCore, uic
+
+import distutils.sysconfig
+
+def get_resource_path(filename):
+	if __name__ == '__main__':
+		return filename
+
+	return os.path.join(distutils.sysconfig.get_python_lib(),
+			    'opendialer', filename)
 
 #------------------------------------------------------------------------------
 # Local helper functions
@@ -276,7 +285,7 @@ class PhoneDialog(QtGui.QMainWindow):
 
     def init_gui(self):
         QtGui.QMainWindow.__init__(self)
-        self.ui = uic.loadUi('dialer.ui')
+        self.ui = uic.loadUi(get_resource_path('dialer.ui'))
         self.green_palette = self.ui.buttonDial.palette()
         self.red_palette = self.ui.buttonHangupAll.palette()
         self.button_palette = self.ui.buttonNumber1.palette()
@@ -685,7 +694,7 @@ class PhoneDialog(QtGui.QMainWindow):
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
-if __name__ == "__main__":
+def main():
 	dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 	app = QtGui.QApplication(sys.argv)
 
@@ -723,3 +732,6 @@ if __name__ == "__main__":
 
 	win = PhoneDialog(modem_path)
 	sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    main()
