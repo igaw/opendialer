@@ -26,3 +26,16 @@ with any other component as long as it mimics the same API specification.
 
 If you also want the audio to be routed appropriately, you might also be
 interested in the provided utility scripts included with this component.
+
+Running and Installing
+======================
+
+* Running the application
+	cd dialer
+	python opendialer.py
+
+* Generating source distribution package
+	python setup.py sdist
+
+* Generating RPM distribution package
+	python setup.py bdist_rpm
